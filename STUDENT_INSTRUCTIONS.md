@@ -7,8 +7,8 @@ A full-stack AI agent that helps a homebuyer decide whether a house is fairly pr
 One user turn looks like this:
 
     user:  "I found a 3-bed, 2-bath, 1,820 sqft house built in 1995, listed at $250k."
-    agent: (missing neighborhood, condition, lot size...) -> asks for them in one question
-    user:  "OldTown neighborhood, condition 7/10, 7,000 sqft lot, 2-car garage,
+    agent: (missing neighborhood, quality, lot size...) -> asks for them in one question
+    user:  "OldTown neighborhood, quality 7/10, 7,000 sqft lot, 2-car garage,
             800 sqft basement, central air, 2-story, 1 fireplace."
     agent: predict_price(...) -> $170,490 -> "At $250k it's overpriced; the model
             values it around $170k."
@@ -35,20 +35,19 @@ Train a house-price model on the Ames dataset you were given as SQLite.
 
 - Load the SQLite file into a pandas DataFrame — practise getting the data with
   `pd.read_sql_query`; don't hardcode a CSV.
-- Build one sklearn Pipeline: impute missing values, one-hot encode the categorical
-  columns, scale the numeric columns, and log-transform the target (prices are
-  right-skewed).
+- Build one sklearn Pipeline: impute (a safety net — the provided data is complete),
+  one-hot encode the three categorical columns (Neighborhood, HouseStyle, CentralAir),
+  scale the numeric columns, and log-transform the target (prices are right-skewed).
 - Train a linear regression on the log of the price. This is the model to use.
   (Comparing other models or doing hyperparameter tuning is optional — not the focus.)
 - Save the whole pipeline (preprocessing + model) to `house_price_model.joblib`.
 
 Serving notes (you'll need these for the tool later):
 
-- The model expects all ~75 columns, but a buyer only gives you ~12: bedrooms,
-  bathrooms, sqft, year built, lot size, neighborhood, condition (1-10), garage
-  spaces, basement sqft, central air, house style, fireplaces.
-- For the columns the buyer didn't give, leave them as NaN — the pipeline's own
-  imputers fill them with the training median/mode.
+- The model has exactly 13 features, and the buyer provides all of them — nothing
+  needs imputing: bedrooms, full baths, half baths, living area (sqft), year built,
+  lot size, neighborhood, overall quality (1-10), garage spaces, basement sqft,
+  central air, house style, fireplaces.
 - The neighborhood must be one of the 25 Ames neighborhoods; reject anything else
   with a clear message listing the valid ones.
 
@@ -82,7 +81,7 @@ Requirements:
 - Use the mcp SDK's `MCPServer` and the `@mcp.tool` decorator.
 - Give each tool a clear docstring — the LLM reads it to decide when and how to call the
   tool, and the parameter types define the required inputs.
-- `predict_price` must declare all 12 buyer inputs as required parameters — that's what
+- `predict_price` must declare all 13 buyer inputs as required parameters — that's what
   makes the agent ask for the ones that are missing.
 - Serve it on its own port with uvicorn (`streamable_http_app`).
 
@@ -154,8 +153,9 @@ That's it. Keep it plain.
 One SQLite database and three PDFs. Everything else you build.
 
 - `data/app.db` — a single SQLite file with three tables:
-  - `houses` — the Ames dataset, pre-loaded: 1,460 rows, ~75 feature columns plus the
-    `SalePrice` target (identifier and mostly-empty columns already dropped).
+  - `houses` — the Ames dataset, pre-loaded: 1,460 rows, 13 feature columns plus the
+    `SalePrice` target (the full ~75-column Ames set trimmed to the 13 features a buyer
+    can realistically provide).
   - `users` — empty, schema only: `user_id` (email, primary key), `key_hash`,
     `credits` (default 100), `created_at`. You insert a row on signup.
   - `usage` — empty, schema only: `user_id`, `action`, `credits`, `ts`. You insert a
@@ -183,7 +183,7 @@ One SQLite database holds everything relational: `houses` (training), `users` + 
 
 Build in this order — each step is testable on its own before you move on:
 
-1. The ML model (3.1) — first, because it fixes the 12 features everything else depends on.
+1. The ML model (3.1) — first, because it fixes the 13 features everything else depends on.
 2. The RAG search (3.2) — independent of the model; do it second (or in parallel).
 3. The MCP server (3.3) — wrap 1 and 2 into your two tools.
 4. The FastAPI service (3.5) — auth/rate-limit/credits first (the Class 1 pattern), then
@@ -230,7 +230,7 @@ Your project is done when every one of these works:
 - Empty credits -> 402; topping up lets you continue.
 - Ask about a house with only some details -> the agent asks for the missing inputs
   (in one question).
-- Give it all 12 details -> it predicts a price and compares it to the listing price
+- Give it all 13 details -> it predicts a price and compares it to the listing price
   with a verdict.
 - Ask a tax/homebuying question -> it answers from the RAG docs and names the source.
 - Credits decrement correctly: chat = 1, predict_price = 3, search_knowledge = 2.
